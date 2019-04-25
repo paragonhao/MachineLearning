@@ -69,23 +69,6 @@ StockRetAcct[, `:=`(Ones = 1)]
 # sort by year
 setkey(StockRetAcct, year)
 
-# #shift all characteristics
-# StockRetAcct[, `:=`(lnIssue = shift(lnIssue),
-#                     lnProf = shift(lnProf),
-#                     lnInv = shift(lnInv),
-#                     lnME = shift(lnME),
-#                     lnIssue2 = shift(lnIssue2),
-#                     lnProf2 = shift(lnProf2),
-#                     lnInv2 = shift(lnInv2),
-#                     lnME2 = shift(lnME2),
-#                     lnIssue_ME = shift(lnIssue_ME),
-#                     lnProf_ME = shift(lnProf_ME),
-#                     lnInv_ME = shift(lnInv_ME),
-#                     Ones = shift(Ones)
-#                     ), by = FirmID]
-
-#StockRetAcct[, ExRet := shift(ExRet, type = "lead",fill = 0), by = FirmID]
-
 # Run Machine learning based trading on page 46 of Lecture 4 
 factor_return <- NULL
 years <- sort(unique(StockRetAcct$year))
@@ -110,7 +93,7 @@ factor_ret_mean <- colMeans(factor_return)
 sigma_cov <- cov(factor_return)
 
 result <- list(Factor_mean = factor_ret_mean, var_cov = sigma_cov, SR_Return = colMeans(factor_return)/sqrt(diag(var(factor_return))))
-
+result
 ```
 
 (ii)
@@ -134,6 +117,9 @@ crossValidation <- function(insample, outsample){
 }
 
 # find sample average factor returns and covariance matrix from 1980‐1999
+get_coef_b <- function(){
+  
+}
 # 1st fold
 insample <- factor_return[1:20,]
 outsample <- factor_return[21:25,]
@@ -164,17 +150,26 @@ mselist <- c(fold_1$mse, fold_2$mse, fold_3$mse, fold_4$mse, fold_5$mse)
 lambdaidx <- which.min(mselist)
 lambda_min <- lambdalist[lambdaidx]
 
-# find beta
-betas <- cbind(fold_1$beta, fold_2$beta, fold_3$beta, fold_4$beta, fold_5$beta)
-b <- betas[,lambdaidx]
+totalsample <- factor_return[1:25,]
+fitWholeSample <- glmnet(cov(totalsample),colMeans(totalsample), family = "gaussian", alpha = 0.5, lambda = lambda_min)
+b <- fitWholeSample$beta
+b
+```
 
+(iii)
+```{r}
 # find portfolio stats
 outsample <- factor_return[26:35,]
-MVE_ret <- b %*% t(outsample)
+MVE_ret <- as.matrix(t(b)) %*% t(outsample)
 MVE_mean <- mean(MVE_ret)
 MVE_SD <- sd(MVE_ret)
 MVE_SR <- MVE_mean/MVE_SD
+result_3 <- list(average_return = MVE_mean, standard_deviation= MVE_SD, sharpe_ratio = MVE_SR)
+result_3
+```
 
+(iv)
+```{r}
 # get market return 
 # Download data and set as data.table
 stockdata <- as.data.table(read.dta("StockRetAcct_insample.dta"))
@@ -195,7 +190,19 @@ scale_MVE_ret <- MVE_ret/scale_facotor
 vwretd_cum_ret <- cumprod(1 + vwretd$MeanExRetYr[26:35]) -1
 MVE_cum_ret <- cumprod(scale_MVE_ret + 1) -1
 
-plot(x =2005:2014, ylim=c(-0.3,2.5),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return", type="l", col="blue", ylab="Return", xlab="Year")
+plot(x =2005:2014, ylim=c(-0.3,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return", type="l", col="blue", ylab="Return", xlab="Year")
 lines(x =2005:2014 , y=MVE_cum_ret, type="l", col="red")
-legend("topleft",legend=c("Estimation","Actual"),fill=c("red","blue"), cex = 0.8)
+legend("topleft",legend=c("Estimation","Actual"),fill=c("red","blue"))
 ```
+
+Now we could work on expanding window for prediction, 
+
+```{r}
+outsample <- factor_return[26,]
+MVE_ret_1yr <- sum(b * outsample)
+
+
+
+
+```
+
