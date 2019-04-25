@@ -1,0 +1,201 @@
+---
+header-includes:
+- \usepackage{amssymb, amsmath, amsthm}
+- \usepackage{tabu}
+- \newcommand{\E}{\mathbb{E}}
+- \newcommand{\var}{{\rm Var}}
+- \newcommand{\N}{\mathcal{N}}
+output: pdf_document
+---
+
+\noindent \begin{tabu} to \textwidth {@{}X[4 l] @{}X[r]}
+  \textbf{HW 4}           & \\ 
+  \textbf{MFE 431: Data Analytics and Machine Learning}   & \\ 
+  \textbf{Professor Lars Lochstoer}         & \\
+  \textbf{Group 9}          &\\
+  \textbf{Students: Yuhua Deng, Xiahao Wang, Nupur Solanki, Haoxuan Tong}
+\end{tabu}
+
+
+## Qn 1
+
+a.
+
+(i)
+
+```{r}
+rm(list=ls())
+
+# we need the foreign package to import data in different format
+suppressMessages(require(foreign))
+suppressMessages(require(data.table))
+suppressMessages(require(knitr))
+suppressMessages(require(ggplot2))
+suppressMessages(require(lfe))
+suppressMessages(require(glmnet))
+
+# Download data and set as data.table
+StockRetAcct_raw <- as.data.table(read.dta("StockRetAcct_insample.dta"))
+
+# Find excess return 
+StockRetAcct_raw[,ExRet:=exp(lnAnnRet) - exp(lnRf)]
+
+# Get the four variables
+StockRetAcct <- StockRetAcct_raw[,.(FirmID, year, ExRet, lnIssue, lnProf, lnInv, lnME)]
+
+# Get the square of variables
+StockRetAcct <- StockRetAcct[, `:=`(lnIssue2 = lnIssue^2, lnProf2 = lnProf^2, lnInv2 = lnInv^2, lnME2 = lnME^2)]
+
+# multiply by lnMe
+StockRetAcct <- StockRetAcct[, `:=`(lnIssue_ME = lnIssue * lnME, lnProf_ME = lnProf * lnME, lnInv_ME = lnInv * lnME)]
+
+# demean the data
+StockRetAcct[, `:=`(lnIssue = lnIssue - mean(lnIssue,na.rm = TRUE), 
+                    lnProf = lnProf - mean(lnProf,na.rm = TRUE),
+                    lnInv = lnInv - mean(lnInv,na.rm = TRUE),
+                    lnME = lnME - mean(lnME,na.rm = TRUE),
+                    lnIssue2 = lnIssue2 - mean(lnIssue2,na.rm = TRUE),
+                    lnProf2 = lnProf2 - mean(lnProf2,na.rm = TRUE),
+                    lnInv2 = lnInv2 - mean(lnInv2,na.rm = TRUE),
+                    lnME2 = lnME2 - mean(lnME2,na.rm = TRUE),
+                    lnIssue_ME = lnIssue_ME - mean(lnIssue_ME,na.rm = TRUE),
+                    lnProf_ME = lnProf_ME - mean(lnProf_ME,na.rm = TRUE),
+                    lnInv_ME = lnInv_ME - mean(lnInv_ME,na.rm = TRUE)
+                    ), by = year]
+
+# add final column of 1's
+StockRetAcct[, `:=`(Ones = 1)]
+
+# sort by year
+setkey(StockRetAcct, year)
+
+# #shift all characteristics
+# StockRetAcct[, `:=`(lnIssue = shift(lnIssue),
+#                     lnProf = shift(lnProf),
+#                     lnInv = shift(lnInv),
+#                     lnME = shift(lnME),
+#                     lnIssue2 = shift(lnIssue2),
+#                     lnProf2 = shift(lnProf2),
+#                     lnInv2 = shift(lnInv2),
+#                     lnME2 = shift(lnME2),
+#                     lnIssue_ME = shift(lnIssue_ME),
+#                     lnProf_ME = shift(lnProf_ME),
+#                     lnInv_ME = shift(lnInv_ME),
+#                     Ones = shift(Ones)
+#                     ), by = FirmID]
+
+#StockRetAcct[, ExRet := shift(ExRet, type = "lead",fill = 0), by = FirmID]
+
+# Run Machine learning based trading on page 46 of Lecture 4 
+factor_return <- NULL
+years <- sort(unique(StockRetAcct$year))
+
+for(i in years){
+  X <- StockRetAcct[year == i, c(15,4:14)]
+  ex_ret <-  StockRetAcct[year == i, .(ExRet)]
+  
+  # replace NAs with 0 
+  X[is.na(X)] <- 0
+  # replace NAs with excess return
+  ex_ret[is.na(ex_ret)] <- 0
+  
+  temp <- t(as.matrix(X)) %*% as.matrix(ex_ret)
+  factor_return <- rbind(factor_return, t(temp))
+}
+
+# find the factor sample means
+factor_ret_mean <- colMeans(factor_return)
+
+# find the sample variance‐covariance matrix
+sigma_cov <- cov(factor_return)
+
+result <- list(Factor_mean = factor_ret_mean, var_cov = sigma_cov, SR_Return = colMeans(factor_return)/sqrt(diag(var(factor_return))))
+
+```
+
+(ii)
+```{r}
+rownames(factor_return) <- 1980:2014
+
+crossValidation <- function(insample, outsample){
+  
+  insampleMean <- colMeans(insample)
+  insampleCov <- cov(insample)
+  fit <- glmnet(insampleCov,insampleMean, family = "gaussian", alpha = 0.5)
+  beta <- as.matrix(fit[['beta']])
+  
+  outsampleMean <- colMeans(outsample)
+  outsampleCov <- cov(outsample)
+  value <- outsampleCov %*% beta
+  epsilon <- outsampleMean - value
+  mse = apply(epsilon, 2, function(x) sum(x^2)/12)
+  lambda <- fit$lambda
+  return(list(mse=mse, beta=beta, lambda=lambda))
+}
+
+# find sample average factor returns and covariance matrix from 1980‐1999
+# 1st fold
+insample <- factor_return[1:20,]
+outsample <- factor_return[21:25,]
+fold_1 <- crossValidation(insample, outsample)
+
+# 2nd fold 
+insample <- factor_return[c(1:5,11:25),]
+outsample <- factor_return[6:10,]
+fold_2 <- crossValidation(insample, outsample)
+
+# 3rd fold 
+insample <- factor_return[c(1:10, 16:25),]
+outsample <- factor_return[11:15,]
+fold_3 <- crossValidation(insample, outsample)
+
+# 4th fold
+insample <- factor_return[c(1:15, 21:25),]
+outsample <- factor_return[16:20,]
+fold_4 <- crossValidation(insample, outsample)
+
+# fifth fold
+insample <- factor_return[6:25,]
+outsample <- factor_return[1:5,]
+fold_5 <- crossValidation(insample, outsample)
+
+lambdalist <- c(fold_1$lambda, fold_2$lambda, fold_3$lambda, fold_4$lambda, fold_5$lambda)
+mselist <- c(fold_1$mse, fold_2$mse, fold_3$mse, fold_4$mse, fold_5$mse)
+lambdaidx <- which.min(mselist)
+lambda_min <- lambdalist[lambdaidx]
+
+# find beta
+betas <- cbind(fold_1$beta, fold_2$beta, fold_3$beta, fold_4$beta, fold_5$beta)
+b <- betas[,lambdaidx]
+
+# find portfolio stats
+outsample <- factor_return[26:35,]
+MVE_ret <- b %*% t(outsample)
+MVE_mean <- mean(MVE_ret)
+MVE_SD <- sd(MVE_ret)
+MVE_SR <- MVE_mean/MVE_SD
+
+# get market return 
+# Download data and set as data.table
+stockdata <- as.data.table(read.dta("StockRetAcct_insample.dta"))
+
+# Find excess return 
+stockdata[,ExRet:=exp(lnAnnRet) - exp(lnRf)]
+
+setkey(stockdata, year)
+
+# value=weight
+vwretd <- stockdata[, list(MeanExRetYr = weighted.mean(ExRet, MEwt, na.rm = T)), by = year]
+
+# market std 
+mktsd <- sd(vwretd$MeanExRetYr)
+scale_facotor <- MVE_SD/mktsd
+scale_MVE_ret <- MVE_ret/scale_facotor
+
+vwretd_cum_ret <- cumprod(1 + vwretd$MeanExRetYr[26:35]) -1
+MVE_cum_ret <- cumprod(scale_MVE_ret + 1) -1
+
+plot(x =2005:2014, ylim=c(-0.3,2.5),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return", type="l", col="blue", ylab="Return", xlab="Year")
+lines(x =2005:2014 , y=MVE_cum_ret, type="l", col="red")
+legend("topleft",legend=c("Estimation","Actual"),fill=c("red","blue"), cex = 0.8)
+```
