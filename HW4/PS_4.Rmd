@@ -253,17 +253,19 @@ normalized_ret <- t(apply(normalized_ret, 1, function(x){ cumprod(x + 1) - 1}))
 
 color <- brewer.pal(n = 10, name = 'Paired')
 
-plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return 10 Year with different Alpha", type="l", col="blue", ylab="Return", xlab="Year")
+plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return 10 Year with different Alpha", type="l", col="black", ylab="Return", xlab="Year")
 for(i in 1:10){
   lines(x =2005:2014 , y=normalized_ret[i,], type="l", col=color[i])  
 }
 legend("topleft", legend=paste0("alpha-",alpha), fill=color, cex = 0.8)
-
+legend("bottomleft", legend="vwretd", fill=c("black"), cex = 0.8)
 
 
 ```
 
-Also we can manipulate the alpha to see the result for 1 year prediction
+Also we can manipulate the alpha to see the result for 1 year prediction.
+As, we can see, return is highest is when alpha = 0
+
 
 ```{r}
 alpha <- seq(0,1,0.1)
@@ -297,11 +299,12 @@ colnames(cum_ret) <- years[26:35]
 
 color <- brewer.pal(n = 10, name = 'Paired')
 
-plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return 1 Year with different Alpha", type="l", col="blue", ylab="Return", xlab="Year")
+plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return 1 Year with different Alpha", type="l", col="black", ylab="Return", xlab="Year")
 for(i in 1:10){
   lines(x =2005:2014 , y=cum_ret[i,], type="l", col=color[i])  
 }
-#legend("topleft", legend=c(paste0("alpha-",alpha), fill=color, cex = 0.8)
+legend("topleft", legend=c(paste0("alpha-",alpha)), fill=color, cex = 0.8)
+legend("bottomleft", legend="vwretd", fill=c("black"), cex = 0.8)
 
 ```
 
