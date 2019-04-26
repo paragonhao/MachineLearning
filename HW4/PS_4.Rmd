@@ -100,11 +100,11 @@ result
 ```{r}
 rownames(factor_return) <- 1980:2014
 
-crossValidation <- function(insample, outsample){
+crossValidation <- function(insample, outsample, alpha){
   
   insampleMean <- colMeans(insample)
   insampleCov <- cov(insample)
-  fit <- glmnet(insampleCov,insampleMean, family = "gaussian", alpha = 0.5)
+  fit <- glmnet(insampleCov,insampleMean, family = "gaussian", alpha = alpha)
   beta <- as.matrix(fit[['beta']])
   
   outsampleMean <- colMeans(outsample)
@@ -117,43 +117,45 @@ crossValidation <- function(insample, outsample){
 }
 
 # find sample average factor returns and covariance matrix from 1980‐1999
-get_coef_b <- function(){
+get_coef_b <- function(pos, alpha){
+  # 1st fold
+  insample <- factor_return[(1+pos):(20+pos),]
+  outsample <- factor_return[(21+pos):(25+pos),]
+  fold_1 <- crossValidation(insample, outsample, alpha)
   
+  # 2nd fold 
+  insample <- factor_return[c((1+pos):(5+pos),(11+pos):(25+pos)),]
+  outsample <- factor_return[(6+pos):(10+pos),]
+  fold_2 <- crossValidation(insample, outsample, alpha)
+  
+  # 3rd fold 
+  insample <- factor_return[c((1+pos):(10+pos), (16+pos):(25+pos)),]
+  outsample <- factor_return[(11+pos):(15+pos),]
+  fold_3 <- crossValidation(insample, outsample, alpha)
+  
+  # 4th fold
+  insample <- factor_return[c((1+pos):(15+pos), (21+pos):(25+pos)),]
+  outsample <- factor_return[(16+pos):(20+pos),]
+  fold_4 <- crossValidation(insample, outsample, alpha)
+  
+  # fifth fold
+  insample <- factor_return[(6+pos):(25+pos),]
+  outsample <- factor_return[(1+pos):(5+pos),]
+  fold_5 <- crossValidation(insample, outsample, alpha)
+  
+  lambdalist <- c(fold_1$lambda, fold_2$lambda, fold_3$lambda, fold_4$lambda, fold_5$lambda)
+  mselist <- c(fold_1$mse, fold_2$mse, fold_3$mse, fold_4$mse, fold_5$mse)
+  lambdaidx <- which.min(mselist)
+  lambda_min <- lambdalist[lambdaidx]
+  
+  totalsample <- factor_return[(1+pos):(25+pos),]
+  fitWholeSample <- glmnet(cov(totalsample),colMeans(totalsample), family = "gaussian", alpha = alpha, lambda = lambda_min)
+  b <- fitWholeSample$beta
+  return(b)
 }
-# 1st fold
-insample <- factor_return[1:20,]
-outsample <- factor_return[21:25,]
-fold_1 <- crossValidation(insample, outsample)
 
-# 2nd fold 
-insample <- factor_return[c(1:5,11:25),]
-outsample <- factor_return[6:10,]
-fold_2 <- crossValidation(insample, outsample)
+b <- get_coef_b(0, 0.5)
 
-# 3rd fold 
-insample <- factor_return[c(1:10, 16:25),]
-outsample <- factor_return[11:15,]
-fold_3 <- crossValidation(insample, outsample)
-
-# 4th fold
-insample <- factor_return[c(1:15, 21:25),]
-outsample <- factor_return[16:20,]
-fold_4 <- crossValidation(insample, outsample)
-
-# fifth fold
-insample <- factor_return[6:25,]
-outsample <- factor_return[1:5,]
-fold_5 <- crossValidation(insample, outsample)
-
-lambdalist <- c(fold_1$lambda, fold_2$lambda, fold_3$lambda, fold_4$lambda, fold_5$lambda)
-mselist <- c(fold_1$mse, fold_2$mse, fold_3$mse, fold_4$mse, fold_5$mse)
-lambdaidx <- which.min(mselist)
-lambda_min <- lambdalist[lambdaidx]
-
-totalsample <- factor_return[1:25,]
-fitWholeSample <- glmnet(cov(totalsample),colMeans(totalsample), family = "gaussian", alpha = 0.5, lambda = lambda_min)
-b <- fitWholeSample$beta
-b
 ```
 
 (iii)
@@ -195,14 +197,111 @@ lines(x =2005:2014 , y=MVE_cum_ret, type="l", col="red")
 legend("topleft",legend=c("Estimation","Actual"),fill=c("red","blue"))
 ```
 
-Now we could work on expanding window for prediction, 
+Now we could work on rolling window for prediction, 
 
 ```{r}
-outsample <- factor_return[26,]
-MVE_ret_1yr <- sum(b * outsample)
+ret_list <- rep(0,10)
+ret_list[1] <- MVE_ret[1]
+alpha <- 0.5
+
+for(i in 1:9){
+  b <- get_coef_b(i, 0.5)
+  outsample <- factor_return[26+i,]
+  ret_list[(1+i)] <- outsample %*% as.matrix(b)
+}
+
+ret_sd <- sd(ret_list)
+scale_facotor_3 <- ret_sd/mktsd
+scale_MVE_ret_3 <- ret_list/scale_facotor_3
+
+MVE_cum_ret_3 <- cumprod(scale_MVE_ret_3 + 1) -1
+
+plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return With Rolling Window for One year Estimate", type="l", col="blue", ylab="Return", xlab="Year")
+lines(x =2005:2014 , y=MVE_cum_ret_3, type="l", col="red")
+legend("topleft",legend=c("Estimation","Actual"),fill=c("red","blue"))
+
+
+```
+
+Also we can manipulate the alpha to see the result for 10 year prediction
+
+```{r}
+library(RColorBrewer)
+alpha <- seq(0,1,0.1)
+ret_dif_alpha <- c()
+
+for(i in alpha){
+  b <- get_coef_b(0, i)
+  outsample <- factor_return[26:35,]
+  temp <- as.matrix(t(b)) %*% t(outsample)
+  ret_dif_alpha <- rbind(ret_dif_alpha, temp)
+}
+
+df <- as.data.table(ret_dif_alpha)
+stdDev <- apply(df, 1, sd)
+df <- cbind(df, stdDev)
+
+df[,scale_factor := stdDev/mktsd]
+
+scale_factor <- df$scale_factor
+
+normalized_ret <- apply(df, 2, function(x){ x/scale_factor } )
+
+normalized_ret <- normalized_ret[, c(1:10)]
+
+normalized_ret <- t(apply(normalized_ret, 1, function(x){ cumprod(x + 1) - 1}))
+
+color <- brewer.pal(n = 10, name = 'Paired')
+
+plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return 10 Year with different Alpha", type="l", col="blue", ylab="Return", xlab="Year")
+for(i in 1:10){
+  lines(x =2005:2014 , y=normalized_ret[i,], type="l", col=color[i])  
+}
+legend("topleft", legend=paste0("alpha-",alpha), fill=color, cex = 0.8)
 
 
 
+```
+
+Also we can manipulate the alpha to see the result for 1 year prediction
+
+```{r}
+alpha <- seq(0,1,0.1)
+
+one_yr_estimate <- function(alpha){
+  ret_list <- rep(0,10)
+  ret_list[1] <- MVE_ret[1]
+  
+  for(i in 1:9){
+    b <- get_coef_b(i, alpha)
+    outsample <- factor_return[26+i,]
+    ret_list[(1+i)] <- outsample %*% as.matrix(b)
+  }
+  
+  ret_sd <- sd(ret_list)
+  scale_facotor_3 <- ret_sd/mktsd
+  scale_MVE_ret_3 <- ret_list/scale_facotor_3
+  
+  MVE_cum_ret_3 <- cumprod(scale_MVE_ret_3 + 1) -1
+  return(MVE_cum_ret_3)
+}
+
+cum_ret <- c()
+
+for(i in alpha){
+  temp <- one_yr_estimate(i)
+  cum_ret <- rbind(cum_ret, temp)
+}
+
+colnames(cum_ret) <- years[26:35]
+
+color <- brewer.pal(n = 10, name = 'Paired')
+
+plot(x =2005:2014, ylim=c(-0.6,2),y = vwretd_cum_ret, main="Return Estimation Vs Actual Return 1 Year with different Alpha", type="l", col="blue", ylab="Return", xlab="Year")
+for(i in 1:10){
+  lines(x =2005:2014 , y=cum_ret[i,], type="l", col=color[i])  
+}
+#legend("topleft", legend=c(paste0("alpha-",alpha), fill=color, cex = 0.8)
 
 ```
 
