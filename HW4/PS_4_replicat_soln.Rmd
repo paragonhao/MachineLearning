@@ -1,0 +1,192 @@
+---
+header-includes:
+- \usepackage{amssymb, amsmath, amsthm}
+- \usepackage{tabu}
+- \newcommand{\E}{\mathbb{E}}
+- \newcommand{\var}{{\rm Var}}
+- \newcommand{\N}{\mathcal{N}}
+output: pdf_document
+---
+
+\noindent \begin{tabu} to \textwidth {@{}X[4 l] @{}X[r]}
+  \textbf{HW 4}           & \\ 
+  \textbf{MFE 431: Data Analytics and Machine Learning}   & \\ 
+  \textbf{Professor Lars Lochstoer}         & \\
+  \textbf{Group 9}          &\\
+  \textbf{Students: Yuhua Deng, Xiahao Wang, Nupur Solanki, Haoxuan Tong}
+\end{tabu}
+
+
+## Qn 1
+
+a.
+
+```{r}
+rm(list=ls())
+
+# we need the foreign package to import data in different format
+suppressMessages(require(foreign))
+suppressMessages(require(data.table))
+suppressMessages(require(knitr))
+suppressMessages(require(ggplot2))
+suppressMessages(require(lfe))
+suppressMessages(require(glmnet))
+suppressMessages(require(Metrics))
+
+# Download data and set as data.table
+StockRetAcct_raw <- as.data.table(read.dta("StockRetAcct_insample.dta"))
+
+# Find excess return 
+StockRetAcct_raw[,ExRet:=exp(lnAnnRet) - exp(lnRf)]
+
+# Get the four variables
+StockRetAcct_DT = StockRetAcct_raw[, .(FirmID, year, ExRet, ff_ind, MEwt, lnIssue,
+lnProf, lnInv, lnME)]
+
+# Create squared variables
+list_of_squared = colnames(StockRetAcct_DT)[-(1:5)]
+
+for (i in list_of_squared) {
+  StockRetAcct_DT[, `:=`(paste0(i, "2"), get(i)^2)]
+}
+
+# create interaction with ME variable
+for(i in list_of_squared[-4]){
+  StockRetAcct_DT[, `:=`(paste0(i, "_ME"), get(i) * lnME)]
+}
+
+# create a constant 
+StockRetAcct_DT[, `:=`(Constant, 1)]
+```
+
+(i)
+
+```{r}
+standardized_StockRetAcct_DT <- copy(StockRetAcct_DT)
+
+# Identify NA observations
+for(i in colnames(standardized_StockRetAcct_DT)[-1]) {
+  standardized_StockRetAcct_DT <- standardized_StockRetAcct_DT[!is.na(get(i))]
+}
+
+# create demeaned dataset
+for (i in colnames(standardized_StockRetAcct_DT)[-c(1:5, 17)]) {
+    standardized_StockRetAcct_DT[, `:=`(paste0(i), (get(i) - mean(get(i)))), by = year]
+}
+
+# Mark sample used for estimation
+standardized_StockRetAcct_DT[,`:=`(Training_data, year <= 2004)]
+
+# Factor portflios
+N_factors <- ncol(standardized_StockRetAcct_DT) - 6
+Factor_matrix <- matrix(NA, nrow = length(unique(standardized_StockRetAcct_DT$year)), ncol = N_factors)
+
+years <- sort(unique(standardized_StockRetAcct_DT$year))
+
+for(i in years){
+  Factor_matrix[(i - 1979), (1:N_factors)] = t(data.matrix(standardized_StockRetAcct_DT[year == i, -c("FirmID", "year", "ExRet", "ff_ind", "MEwt", "Training_data")])) %*%  data.matrix(standardized_StockRetAcct_DT[year == i, .(ExRet)])
+}
+
+colnames(Factor_matrix) <- colnames(standardized_StockRetAcct_DT[, -c("FirmID", "year","ExRet","ff_ind","MEwt","Training_data")])
+
+rownames(Factor_matrix) <- years
+
+# Report factor sample means and sample variance-covariance matrix 
+Factor_avg_ret <- colMeans(Factor_matrix[1:25, 1:N_factors])
+Factor_var_matrix <- var(Factor_matrix[1:25, 1:N_factors])
+Factor_sharpe <- Factor_avg_ret/(diag(var(Factor_matrix[1:25,1:N_factors]))^0.5)
+
+
+result <- list(Mean = Factor_avg_ret, varcov = Factor_var_matrix, sharpe_ratio = Factor_sharpe)
+
+```
+
+
+(ii)
+
+```{r}
+in_sample_Factor_matrix <- Factor_matrix[1:25, 1:N_factors]
+
+for(i in 1:5){
+  # Define sample
+  Factor_sample_avg_ret <- colMeans(in_sample_Factor_matrix[-((5 * (i - 1)  + 1):(5 * i)),])
+  Factor_sample_var_matrix <- var(in_sample_Factor_matrix[-((5 * (i - 1) + 1):(5 * i)),])
+  
+  # Run elastic net 
+  assign(paste0("Elastic_net_", i), glmnet(Factor_sample_var_matrix, Factor_sample_avg_ret, family = "gaussian", alpha = 0.5, standardize = TRUE))
+  
+  if(i == 1){
+    S_min = min(Elastic_net_1$lambda)
+    S_max = max(Elastic_net_1$lambda)
+  }else {
+    S_min = min(S_min, get(paste0("Elastic_net_", i))$lambda)
+    S_max = max(S_max, get(paste0("Elastic_net_", i))$lambda)
+  }
+}
+
+# Predict factor returns and compare
+range_of_lambda <- seq(S_min - 1, S_max + 1, 0.01)
+MSE_lambda <- matrix(NA, nrow = 6, ncol = length(range_of_lambda))
+
+for(i in 1:5){
+  b_matrix = as.matrix(predict(get(paste0("Elastic_net_",i)), type = "coef", s = range_of_lambda))[-1,]
+  
+  for(j in 1:length(range_of_lambda)){
+    MSE_lambda[i,j] = mse(b_matrix[, j] %*% var(in_sample_Factor_matrix[(5 * (i -1) +1):(5 * i),]), colMeans(in_sample_Factor_matrix[(5 * (i -1) +1):(5 * i),]))
+  }
+}
+
+MSE_lambda[6, ] = colMeans(MSE_lambda[1:5, ])
+Best_lambda <- range_of_lambda[which.min(MSE_lambda[6, ])]
+Best_lambda
+
+b_vector <- glmnet(Factor_var_matrix, Factor_avg_ret, family = "gaussian", alpha = 0.5, standardize = T, lambda = Best_lambda)$beta
+b_vector
+```
+
+(iii)
+
+```{r}
+b_vector <- data.matrix(b_vector)
+Out_of_sample_ret <- Factor_matrix[-(1:25), ] %*% b_vector
+result_out_sample <- list(mean= mean(Out_of_sample_ret), stddev = sd(Out_of_sample_ret), sr = mean(Out_of_sample_ret)/sd(Out_of_sample_ret))
+result_out_sample
+```
+
+(iv)
+
+```{r}
+# I define market as the universe of stocks available to me in the previous
+# parts of the problem
+
+# Throw out observations from StockRetAcct_DT that I threw out in
+# standardized_StockRetAcct_DT
+for (i in colnames(StockRetAcct_DT)[-(1)]) {
+  StockRetAcct_DT = StockRetAcct_DT[!is.na(get(i))]
+}
+
+# Calculate 'market' return
+StockRetAcct_DT[, `:=`(MEwt_adj, MEwt/sum(MEwt)), by = year]
+MktRet <- StockRetAcct_DT[year > 2004, .(Mkt_Ret = sum(ExRet * MEwt_adj)), by = year]
+setkey(MktRet, year)
+
+result_Mkt_ret <- list(mean = mean(MktRet$Mkt_Ret), stddev = sd(MktRet$Mkt_Ret), sr = mean(MktRet$Mkt_Ret)/sd(MktRet$Mkt_Ret))
+
+result_Mkt_ret
+
+# scale MVE portfolio to match market 
+Scaled_Out_of_sample_ret <- data.table(Out_of_sample_ret * sd(MktRet$Mkt_Ret)/sd(Out_of_sample_ret))
+setnames(Scaled_Out_of_sample_ret, "s0","Elastic_Ret")
+
+# Calculate cumulative returns
+Scaled_Out_of_sample_ret[, `:=`(Cum_Ret, cumprod(1 + Elastic_Ret))]
+MktRet[, `:=`(Cum_Ret, cumprod(1 + Mkt_Ret))]
+
+qplot(MktRet$year, MktRet$Cum_Ret, geom = "line", xlab = "Year", ylab = "Excess Return",
+      color = I("blue"), size = I(1.5), main = "Value-weighted portfolio (blue) vs. MVE portfolio (red)") + geom_line(aes(y = Scaled_Out_of_sample_ret$Cum_Ret), color = I("red"), size = I(1.5)) +
+theme_bw()
+
+```
+
+
+
