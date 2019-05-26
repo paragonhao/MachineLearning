@@ -1,0 +1,199 @@
+---
+header-includes:
+- \usepackage{amssymb, amsmath, amsthm}
+- \usepackage{tabu}
+- \newcommand{\E}{\mathbb{E}}
+- \newcommand{\var}{{\rm Var}}
+- \newcommand{\N}{\mathcal{N}}
+output: pdf_document
+---
+
+\noindent \begin{tabu} to \textwidth {@{}X[4 l] @{}X[r]}
+  \textbf{HW 4}           & \\ 
+  \textbf{MFE 431: Data Analytics and Machine Learning}   & \\ 
+  \textbf{Professor Lars Lochstoer}         & \\
+  \textbf{Group 9}          &\\
+  \textbf{Students: Yuhua Deng, Xiahao Wang, Nupur Solanki, Haoxuan Tong}
+\end{tabu}
+
+
+## A. Set up data for analysis amanable to cross-validation routines.
+
+1.
+
+```{r}
+suppressMessages(require(foreign))
+suppressMessages(require(data.table))
+suppressMessages(require(lubridate))
+suppressMessages(require(zoo))
+suppressMessages(require(randomForest))
+suppressMessages(require(xgboost))
+suppressMessages(library(lfe))
+suppressMessages(library(stargazer))
+
+return_monthly <- as.data.table(read.csv("French_Portfolio_Returns.csv"))
+
+return_monthly[, Date:= ymd(Date, truncated = 1)]
+return_monthly <- return_monthly[Date > "1963-06-01", ]
+return_monthly[, Month := 1]
+return_monthly[, Month := cumsum(Month)]
+return_monthly[, Date := NULL]
+```
+
+2.
+
+```{r}
+colnames(return_monthly) <- c(1:138, "Month")
+reshaped_return_monthly <- melt(return_monthly, id=c("Month"))
+colnames(reshaped_return_monthly) <- c("Month", "Portfolio","ExRet")
+```
+
+3. 
+
+Final cleaned-up data looks like:
+
+```{r}
+rollingWindow <- 10
+reshaped_return_monthly[, OneM_lag_ret := shift(ExRet, n=1, type = "lag")]
+reshaped_return_monthly[, TwoM_lag_ret := shift(ExRet, n=2, type = "lag")]
+reshaped_return_monthly[, ThreeTo12_lag_ret := shift(rollapply(ExRet, rollingWindow, 
+sum, fill=NA, align="right"), n = 3, type = "lag"), by = Portfolio]
+
+reshaped_return_monthly[, OneM_lag_ret_square := OneM_lag_ret^2]
+reshaped_return_monthly[, TwoM_lag_ret_square := TwoM_lag_ret^2]
+reshaped_return_monthly[, ThreeTo12_lag_ret_square := ThreeTo12_lag_ret^2]
+reshaped_return_monthly
+```
+
+
+
+## B. Decision Trees
+
+1 a
+
+Estimating Random Forest Model
+Using: ntree = 200, maxnodes = 30, mtry=2
+
+```{r}
+reshaped_return_monthly <- na.omit(reshaped_return_monthly)
+
+months <- as.vector(reshaped_return_monthly[Month <= 558,Month])
+y_data_train <- as.vector(reshaped_return_monthly[Month <= 558,ExRet])
+x_data_train <- as.matrix(reshaped_return_monthly[Month <= 558,list(OneM_lag_ret, TwoM_lag_ret, ThreeTo12_lag_ret, OneM_lag_ret_square, TwoM_lag_ret_square, ThreeTo12_lag_ret_square)])
+
+# set maximum terminal nodes equal to 30 for a relatively parsimonious trees
+rfLC <- randomForest(x_data_train, y_data_train, ntree = 200, maxnodes = 30, mtry=2)
+
+# check prediction fit in- and out-of-sample
+RF_pred_in_sample <- predict(rfLC, x_data_train)
+
+# Run a regression of excess return on the predicted value
+LR_in_sample <- cbind(months, RF_pred_in_sample)
+LR_in_sample <- cbind(LR_in_sample, ExRet = y_data_train)
+LR_in_sample <- as.data.frame(LR_in_sample)
+
+LR_test_in_sample <- felm(ExRet ~ RF_pred_in_sample | 0 | 0 | months, LR_in_sample)
+summary(LR_test_in_sample)
+
+```
+
+b
+
+```{r}
+
+# test data is data from 2009 dec and on 
+y_data_test <- as.vector(reshaped_return_monthly[Month > 558,ExRet])
+x_data_test <- as.matrix(reshaped_return_monthly[Month > 558,list(OneM_lag_ret, TwoM_lag_ret, ThreeTo12_lag_ret, OneM_lag_ret_square, TwoM_lag_ret_square, ThreeTo12_lag_ret_square)])
+
+# check prediction fit in- and out-of-sample
+RF_pred_out_of_sample <- predict(rfLC, x_data_test)
+
+# Run a linear panel regression of realized returns on the predicted values
+RF_test_out_of_sample <- lm(y_data_test ~ RF_pred_out_of_sample)
+summary(RF_test_out_of_sample)
+
+# Run a regression of excess return on the predicted value
+months_test <- as.vector(reshaped_return_monthly[Month > 558,Month])
+LR_out_sampe <- cbind(months_test, RF_pred_out_of_sample)
+LR_out_sampe <- cbind(LR_out_sampe, ExRet = y_data_test)
+LR_out_sampe <- as.data.frame(LR_out_sampe)
+
+LR_test_in_sample <- felm(ExRet ~ RF_pred_out_of_sample | 0 | 0 | months_test, LR_out_sampe)
+summary(LR_test_in_sample)
+```
+
+c
+
+```{r}
+# Fama-MacBeth regression using out-of-sample predicted values
+# Random Forest First
+port_ret = NULL
+
+y_data_test2 <- reshaped_return_monthly[Month > 558,.(Month, ExRet)]
+y_data_test2 <- cbind(y_data_test2, RF_pred_out_of_sample= RF_pred_out_of_sample)
+
+for (i in unique(y_data_test2$Month)){
+  data <- y_data_test2[Month ==i]
+  
+  x_temp <- data$RF_pred_out_of_sample
+  y_temp <- data$ExRet
+  
+  fit_yr <- lm(y_temp ~ x_temp)
+  temp <- coefficients(fit_yr)
+  
+  port_ret <- rbind(port_ret, temp[2])
+}
+# recall, scale depends on magnitude of x-variable, so only fair to compare Sharpe ratios and t-stats
+fm_RF_output = list(SR_Return = mean(port_ret)/sqrt(var(port_ret)), tstat_MeanRet = sqrt(length(unique(y_data_test2$Month)))*mean(port_ret)/sqrt(var(port_ret)))
+fm_RF_output
+
+```
+
+T stats is too small, not significnt enough.
+
+2. Using XGBoost 
+
+Start with {eta = 0.1, maxdepth = 1}
+```{r echo = T, results = 'hide'}
+x_data_train <- apply(x_data_train, 2, as.numeric)
+y_data_train <- as.double(y_data_train)
+
+x_data_test <- apply(x_data_test, 2, as.numeric)
+y_data_test <- as.double(y_data_test)
+
+# first, let's set parameters for the xgboost, no regularization (gamma = 0) other than the cv procedure
+RunXGBoost <- function(eta, max_depth){
+  
+  params <- list(booster = "gbtree", objective = "reg:linear", eta= eta, gamma = 0, max_depth = max_depth)
+
+  # XGBoost likes to use xgb.DMatrix
+  xgb_train <- xgb.DMatrix(data = x_data_train, label = y_data_train)
+  
+  # use xgb.cv to find the best nround (number of trees) for this model.
+  xgbcv <- xgb.cv(params = params, data = xgb_train, nfold = 10, nrounds = 100, showsd = T, print_every_n = 20)
+  
+  # pick out the lowest cv mean rmse
+  cv_nrounds = which.min(xgbcv$evaluation_log$test_rmse_mean)
+  
+  # with optimal nrounds in hand, run the prediction for out of sample
+  xgb_optb <- xgboost(params = params, data = xgb_train, nround = cv_nrounds)
+  xgb_test <- xgb.DMatrix(data = x_data_test, label = y_data_test)
+  xgb_pred <- predict(xgb_optb, xgb_test)
+  xgb_test_out_of_sample <- lm(y_data_test~xgb_pred)
+  summary(xgb_test_out_of_sample)
+  
+  # plot importance of features in order to understand model
+  return(boost_out <- xgb.importance(feature_names = colnames(x_data_test), model = xgb_optb))
+}
+
+plot1 <- RunXGBoost(0.1, 1)
+plot2 <- RunXGBoost(0.1, 6)
+plot3 <- RunXGBoost(0.3, 1)
+plot4 <- RunXGBoost(0.3, 6)
+
+xgb.plot.importance(importance_matrix = plot1)
+xgb.plot.importance(importance_matrix = plot2)
+xgb.plot.importance(importance_matrix = plot3)
+xgb.plot.importance(importance_matrix = plot4)
+```
+
