@@ -1,4 +1,8 @@
 suppressMessages(require(data.table))
+suppressMessages(require(lfe))
+suppressMessages(require(foreign))
+suppressMessages(require(stargazer))
+
 
 rm(list=ls())
 options(max.print=100)
@@ -16,11 +20,11 @@ world_bank_raw_data[, Country.Name := NULL]
 
 # factors: 
 # 1. population growth SP.POP.GROW
-# 2. Energy use (kg of oil equivalent per capita) EG.USE.PCAP.KG.OE
+# 2. Energy use (kg of oil equivalent per capita) EG.USE.PCAP.KG.OE, consider taking out as not a lot of data
 # 3. Inflation, consumer prices (annual %) FP.CPI.TOTL.ZG
 # 4. Exports of goods and services (% of GDP) NE.EXP.GNFS.ZS
 # 5. Imports of goods and services (% of GDP)  NE.IMP.GNFS.ZS
-# 6. High-technology exports (% of manufactured exports) TX.VAL.TECH.MF.ZS
+# 6. High-technology exports (% of manufactured exports) TX.VAL.TECH.MF.ZS, consider taking out as not a lot of data
 # 7. Foreign direct investment, net inflows (% of GDP) BN.KLT.DINV.CD
 # 8. Gross capital formation (% of GDP)  NE.GDI.TOTL.ZS
 
@@ -30,15 +34,37 @@ reshaped_wb_data <- melt(world_bank_raw_data, id.vars = c("Country_code", "Facto
                          value.name = "Factor_value")
 reshaped_wb_data[Factor_value=="..", Factor_value := NA]
 
-factorsInModel <- c("NY.GDP.MKTP.KD.ZG", "SP.POP.GROW", "EG.USE.PCAP.KG.OE", 
-                    "FP.CPI.TOTL.ZG", "NE.EXP.GNFS.ZS", "NE.IMP.GNFS.ZS", 
-                    "TX.VAL.TECH.MF.ZS", "BN.KLT.DINV.CD","NE.GDI.TOTL.ZS") 
+factorsInModel <- c("NY.GDP.MKTP.KD.ZG", "SP.POP.GROW",
+                    "FP.CPI.TOTL.ZG", "NE.EXP.GNFS.ZS", "NE.IMP.GNFS.ZS", "BN.KLT.DINV.CD","NE.GDI.TOTL.ZS") 
 
 reshaped_wb_data <- reshaped_wb_data[Factor_name %in% factorsInModel,]
 
 # reshape factors to columns
 final_data <- dcast(reshaped_wb_data, Country_code +  year ~ Factor_name , value.var="Factor_value")
 
+# sort the data
+setorder(final_data, Country_code, year)
 
+# lagg all the t-1 variable to match with GDP at t
+for(i in factorsInModel){
+  final_data[, `:=`(paste0(i,"_lagged"), shift(get(i))), by=c("Country_code")]
+}
+
+# make sure observation is actually next year
+final_data[, year := as.numeric(as.character(year))]
+final_data <- final_data[year!= 2018]
+final_data[, `:=`(next_year, shift(year, type="lead")), by=c("Country_code")]
+final_data[next_year != (year + 1), `:=`(NY.GDP.MKTP.KD.ZG, NA)]
+
+
+factorsInModel_lagged <- paste0(factorsInModel,"_lagged")
+
+# lagg all the t-1 variable to match with GDP at t
+for(i in factorsInModel_lagged){
+  final_data <- final_data[!is.na(get(i))]
+}
+
+
+r1 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged, data = final_data, na.action = na.omit)
 
 
