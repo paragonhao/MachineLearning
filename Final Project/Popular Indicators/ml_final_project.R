@@ -47,7 +47,7 @@ setorder(final_data, Country_code, year)
 
 # lagg all the t-1 variable to match with GDP at t
 for(i in factorsInModel){
-  final_data[, `:=`(paste0(i,"_lagged"), shift(get(i))), by=c("Country_code")]
+  final_data[, `:=`(paste0(i,"_lagged"), shift(as.numeric(get(i)))), by=c("Country_code")]
 }
 
 # make sure observation is actually next year
@@ -64,6 +64,12 @@ for(i in factorsInModel_lagged){
   final_data <- final_data[!is.na(get(i))]
 }
 
+final_data[,NY.GDP.MKTP.KD.ZG:= as.numeric(NY.GDP.MKTP.KD.ZG)]
+
+# convert all lagged variable as numeric
+for(i in factorsInModel_lagged){
+  final_data <- final_data[!is.na(get(i))]
+}
 
 r1 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged, data = final_data, na.action = na.omit)
 
