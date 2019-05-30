@@ -71,6 +71,12 @@ for(i in factorsInModel_lagged){
   final_data <- final_data[!is.na(get(i))]
 }
 
+# mean normalize data 
+for(i in factorsInModel_lagged){
+  final_data[, `:=`(paste0(i), (get(i) - mean(get(i),na.rm=T))/(max(get(i)) - min(get(i)))), by=c("Country_code")]
+}
+
+
 # regression with and without fixed effects
 r1 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged 
            + SP.POP.GROW_lagged + NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged 
@@ -86,6 +92,9 @@ r3 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged
 
 stargazer(r1, r2,r3, type = "text", report = "vc*t", add.lines = 
             list(c("Year FE","N","Y","Y"),c("Country, Year Clustering", "N","N","Y")))
+
+##################################################################    
+
 
 
 ###################### world GDP Construction ###################################
