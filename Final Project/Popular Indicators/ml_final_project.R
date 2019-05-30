@@ -9,7 +9,8 @@ options(max.print=100)
 
 # clean up and reshape the data
 world_bank_raw_data <-as.data.table(read.csv("world_bank_data.csv", header = T, sep = ","))
-world_bank_raw_data <- world_bank_raw_data[ 1:5425,]
+data_length <- dim(world_bank_raw_data)[1]
+world_bank_raw_data <- world_bank_raw_data[ 1:data_length,]
 
 factorNames <- unique(world_bank_raw_data[, .(Series.Name, Series.Code )])
 
@@ -20,11 +21,9 @@ world_bank_raw_data[, Country.Name := NULL]
 
 # factors: 
 # 1. population growth SP.POP.GROW
-# 2. Energy use (kg of oil equivalent per capita) EG.USE.PCAP.KG.OE, consider taking out as not a lot of data
 # 3. Inflation, consumer prices (annual %) FP.CPI.TOTL.ZG
 # 4. Exports of goods and services (% of GDP) NE.EXP.GNFS.ZS
 # 5. Imports of goods and services (% of GDP)  NE.IMP.GNFS.ZS
-# 6. High-technology exports (% of manufactured exports) TX.VAL.TECH.MF.ZS, consider taking out as not a lot of data
 # 7. Foreign direct investment, net inflows (% of GDP) BN.KLT.DINV.CD
 # 8. Gross capital formation (% of GDP)  NE.GDI.TOTL.ZS
 
@@ -34,13 +33,24 @@ reshaped_wb_data <- melt(world_bank_raw_data, id.vars = c("Country_code", "Facto
                          value.name = "Factor_value")
 reshaped_wb_data[Factor_value=="..", Factor_value := NA]
 
-factorsInModel <- c("NY.GDP.MKTP.KD.ZG", "SP.POP.GROW",
-                    "FP.CPI.TOTL.ZG", "NE.EXP.GNFS.ZS", "NE.IMP.GNFS.ZS", "BN.KLT.DINV.CD","NE.GDI.TOTL.ZS") 
-
+factorsInModel <- c("NY.GDP.MKTP.KD.ZG", 
+                    "SP.POP.GROW",
+                    "FP.CPI.TOTL.ZG", 
+                    "NE.EXP.GNFS.ZS", 
+                    "NE.IMP.GNFS.ZS", 
+                    "BN.KLT.DINV.CD",
+                    "EN.ATM.CO2E.PC",
+                    "SE.SEC.ENRR",
+                    "SP.POP.GROW",
+                    "TG.VAL.TOTL.GD.ZS")
 selected_wb_data <- reshaped_wb_data[Factor_name %in% factorsInModel,]
 
 # reshape factors to columns
 final_data <- dcast(selected_wb_data, Country_code +  year ~ Factor_name , value.var="Factor_value")
+
+# restrict to be after year 1970 
+final_data <- final_data[, year := as.numeric(as.character(year))]
+final_data <- final_data[year>1969,]
 
 # sort the data
 setorder(final_data, Country_code, year)
@@ -78,17 +88,17 @@ for(i in factorsInModel_lagged){
 
 
 # regression with and without fixed effects
-r1 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged 
-           + SP.POP.GROW_lagged + NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged 
-           + BN.KLT.DINV.CD_lagged + NE.GDI.TOTL.ZS_lagged, data = final_data, na.action = na.omit)
+r1 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + SP.POP.GROW_lagged + FP.CPI.TOTL.ZG_lagged+
+             NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged + BN.KLT.DINV.CD_lagged + EN.ATM.CO2E.PC_lagged+
+             SE.SEC.ENRR_lagged + SP.POP.GROW_lagged + TG.VAL.TOTL.GD.ZS_lagged, data = final_data, na.action = na.omit)
 
-r2 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged 
-           + SP.POP.GROW_lagged + NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged 
-           + BN.KLT.DINV.CD_lagged + NE.GDI.TOTL.ZS_lagged | 0 | 0 | year, data = final_data, na.action = na.omit)
+r2 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + SP.POP.GROW_lagged + FP.CPI.TOTL.ZG_lagged+
+             NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged + BN.KLT.DINV.CD_lagged + EN.ATM.CO2E.PC_lagged+
+             SE.SEC.ENRR_lagged + SP.POP.GROW_lagged + TG.VAL.TOTL.GD.ZS_lagged | 0 | 0 | year, data = final_data, na.action = na.omit)
 
-r3 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + FP.CPI.TOTL.ZG_lagged 
-           + SP.POP.GROW_lagged + NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged 
-           + BN.KLT.DINV.CD_lagged + NE.GDI.TOTL.ZS_lagged | year | 0 | year + Country_code, data = final_data, na.action = na.omit)
+r3 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + SP.POP.GROW_lagged + FP.CPI.TOTL.ZG_lagged+
+             NE.EXP.GNFS.ZS_lagged + NE.IMP.GNFS.ZS_lagged + BN.KLT.DINV.CD_lagged + EN.ATM.CO2E.PC_lagged+
+             SE.SEC.ENRR_lagged + SP.POP.GROW_lagged + TG.VAL.TOTL.GD.ZS_lagged | year | 0 | year + Country_code, data = final_data, na.action = na.omit)
 
 stargazer(r1, r2,r3, type = "text", report = "vc*t", add.lines = 
             list(c("Year FE","N","Y","Y"),c("Country, Year Clustering", "N","N","Y")))
