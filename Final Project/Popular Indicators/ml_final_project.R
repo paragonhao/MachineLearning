@@ -66,13 +66,7 @@ final_data <- final_data[year!= 2018]
 final_data[, `:=`(next_year, shift(year, type="lead")), by=c("Country_code")]
 final_data[next_year != (year + 1), `:=`(NY.GDP.MKTP.KD.ZG_lagged, NA)]
 
-
 factorsInModel_lagged <- paste0(factorsInModel,"_lagged")
-
-# lagg all the t-1 variable to match with GDP at t
-for(i in factorsInModel_lagged){
-  final_data <- final_data[!is.na(get(i))]
-}
 
 final_data[,NY.GDP.MKTP.KD.ZG:= as.numeric(NY.GDP.MKTP.KD.ZG)]
 
@@ -83,9 +77,27 @@ for(i in factorsInModel_lagged){
 
 # mean normalize data 
 for(i in factorsInModel_lagged){
-  final_data[, `:=`(paste0(i), (get(i) - mean(get(i),na.rm=T))/(max(get(i)) - min(get(i)))), by=c("Country_code")]
+  final_data[, `:=`(paste0(i), (get(i) - mean(get(i),na.rm=T))/(max(get(i)) - min(get(i))))]
 }
 
+############################### Fama Macbeth ########################## 
+setorder(final_data, year)
+listOfYrs <- unique(final_data$year)
+# port_ret = NULL
+# for (i in 1980:2014)
+# {
+#   temp <- StockRetAcct_DT[year==i,]
+#   fit_yr <- lm(temp$ExRet ~ temp$lnBM, data=temp)
+#   temp <- coefficients(fit_yr)
+#   port_ret = rbind(port_ret,temp[2])
+# }
+# fm_output = list(MeanReturn = mean(port_ret), StdReturn = sqrt(var(port_ret)), SR_Return = mean(port_ret)/sqrt(var(port_ret)), tstat_MeanRet = sqrt(1+2014-1980)*mean(port_ret)/sqrt(var(port_ret)))
+# fm_output
+
+
+##################################################################  
+
+##################################################################
 
 # regression with and without fixed effects
 r1 <- felm(NY.GDP.MKTP.KD.ZG ~ NY.GDP.MKTP.KD.ZG_lagged + SP.POP.GROW_lagged + FP.CPI.TOTL.ZG_lagged+
