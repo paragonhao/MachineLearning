@@ -136,7 +136,9 @@ setorder(valueWeight_g20_GDP, year)
 valueWeight_g20_GDP[, GDP_Vw := shift(GDP_Vw, type = "lead")]
 valueWeight_world_GDP <- valueWeight_world_GDP[year >1976 & year < 2015,]
 # predicted GDP Value-weight GDP
-plot(x=valueWeight_g20_GDP$year, ylim=c(-5,5), y= valueWeight_g20_GDP$GDP_Vw + r3$coefficients[1], type = "b", col="blue")
+plot(x=valueWeight_g20_GDP$year, ylim=c(-4,6), main="G20 GDP One Year In-sample Prediction",
+     xlab="GDP Year" , ylab="GDP Growth",
+     y= valueWeight_g20_GDP$GDP_Vw + r3$coefficients[1], type = "b", col="blue")
 # actual GDP 20 Value-weight GDP 
 lines(x=valueWeight_world_GDP$year, y= valueWeight_world_GDP$GDP_Vw, type = "b", col="green")
 legend("bottomleft",legend=c("Value Weight","Actual World Bank Data"), fill=c("blue", "green"))
@@ -144,6 +146,35 @@ legend("bottomleft",legend=c("Value Weight","Actual World Bank Data"), fill=c("b
 
 
 ###################### world GDP Construction ###################################
+# # reshape factors to columns
+# factorList <- c("NY.GDP.MKTP.CD", "NY.GDP.MKTP.KD.ZG")
+# world_GDP_data <- reshaped_wb_data[Factor_name %in% factorList,]
+# final_data_2 <- dcast(world_GDP_data, Country_code +  year ~ Factor_name , value.var="Factor_value")
+# 
+# # convert columns to numeric data
+# final_data_2[, NY.GDP.MKTP.CD:= as.numeric(NY.GDP.MKTP.CD)]
+# final_data_2[, NY.GDP.MKTP.KD.ZG := as.numeric(NY.GDP.MKTP.KD.ZG)]
+# final_data_2[, NY.GDP.MKTP.KD.ZG := NY.GDP.MKTP.KD.ZG/100]
+# 
+# final_data_2[, NY.GDP.MKTP.CD_lagged := shift(NY.GDP.MKTP.CD), by = c("Country_code")]
+# final_data_2 <- final_data_2[NY.GDP.MKTP.CD_lagged != "NA"]
+# 
+# 
+# # value weight portfolio, this might be wrong, let's see
+# valueWeight_world_GDP <- final_data_2[,list(GDP_Vw = weighted.mean( NY.GDP.MKTP.KD.ZG, NY.GDP.MKTP.CD_lagged, na.rm = TRUE)),
+#                                       by=list(year)]
+# 
+# # equal weight portfolio, this might be wrong, let's see
+# equalWeight_world_GDP <- final_data_2[,list(GDP_Ew = mean( NY.GDP.MKTP.KD.ZG, na.rm = TRUE)),
+#                                       by=list(year)]
+# 
+# # sort
+# setorder(valueWeight_world_GDP, year)
+# setorder(equalWeight_world_GDP, year)
+# valueWeight_world_GDP <- valueWeight_world_GDP[-length(valueWeight_world_GDP$year)]
+# equalWeight_world_GDP <- equalWeight_world_GDP[-length(equalWeight_world_GDP$year)]
+
+
 
 # # import World GDP data from work
 # world_GDP_raw_data <-as.data.table(read.csv("world_GDP.csv", header = T, sep = ","))
